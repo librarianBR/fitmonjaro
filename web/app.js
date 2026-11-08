@@ -25,6 +25,7 @@ const toastEl = document.getElementById('toast');
 const restEl = document.getElementById('rest');
 const updateEl = document.getElementById('update');
 const UPDATE_INTERVAL = 15 * 60 * 1000;
+const UPDATE_BACKUP_DELAY = 1200;
 
 let state = emptyState();
 let setupPlan = null; // Plano escolhido na configuração inicial, antes de salvar o perfil.
@@ -50,7 +51,7 @@ function markPending() {
 // Grava só os registros que mudaram. A transação abre na hora do toque, para não se perder se o app
 // for fechado logo depois; o IndexedDB executa as transações na ordem em que foram abertas.
 function save() {
-  if (!db) return;
+  if (!db || loadError) return; // Dados ilegíveis nunca são sobrescritos sem a pessoa escolher um backup.
   const next = snapshot(toRecords(state));
   const ops = diffRecords(queued, next);
   if (!ops.length) return;
@@ -205,12 +206,23 @@ const profileFields = (p) => `
   </div>
   <label>Condições de saúde (opcional) <textarea name="conditions" rows="2" maxlength="500">${esc(p.conditions)}</textarea></label>`;
 
+// Os dados existem, mas esta versão não conseguiu lê-los: nada é gravado até a pessoa decidir.
+function recoveryView() {
+  return `
+    <h1>Dados não lidos</h1>
+    <p class="danger-box">${icon('alert')} Não foi possível ler os dados deste aparelho. Eles continuam guardados e nada será alterado.</p>
+    <section class="card stack">
+      <button type="button" class="primary" data-a="retry-load">${icon('restore')} Tentar de novo</button>
+      <p class="muted">Se o problema continuar, recupere o arquivo mais recente da pasta Downloads. Isso substitui os dados guardados, então salve antes uma cópia deles.</p>
+      <button type="button" class="ghost" data-a="save-raw">${icon('save')} Salvar cópia dos dados guardados</button>
+      ${importButton('backup', 'Recuperar backup')}
+    </section>`;
+}
+
 function setupView() {
-  const error = loadError ? `<p class="danger-box">${icon('alert')} Não foi possível ler os dados salvos neste aparelho. Recupere o backup mais recente da pasta Downloads.</p>` : '';
   if (!setupPlan) {
     return `
     <h1>Bem-vindo</h1>
-    ${error}
     <p class="muted">Seus dados ficam só neste aparelho. Antes de começar, peça liberação ao médico ou ao profissional que acompanha você.</p>
     <section class="card stack">
       <h2>${icon('plan')} Escolha o plano</h2>
@@ -222,7 +234,6 @@ function setupView() {
   }
   return `
     <h1>Bem-vindo</h1>
-    ${error}
     <p class="muted">${icon('check')} Plano: <b>${esc(setupPlan.name)}</b> · <button type="button" class="link" data-a="setup-change-plan">trocar</button></p>
     <form data-form="setup" class="card stack">
       ${profileFields(state.profile)}
@@ -616,7 +627,7 @@ function render({ keepScroll = false } = {}) {
   nav.hidden = !ready;
   const screens = { hoje: homeView, treinos: sessionsView, progresso: progressView, plano: planView, ajustes: settingsView };
   const pages = { ...screens, sessao: () => sessionView(param), concluido: () => doneView(param) };
-  view.innerHTML = route === 'editor' ? editorView(param) : !ready ? setupView() : (pages[route] ?? homeView)();
+  view.innerHTML = loadError ? recoveryView() : route === 'editor' ? editorView(param) : !ready ? setupView() : (pages[route] ?? homeView)();
   const active = route === 'sessao' ? 'treinos' : route === 'editor' ? 'plano' : screens[route] ? route : 'hoje';
   nav.querySelectorAll('a').forEach((a) => a.toggleAttribute('aria-current', a.getAttribute('href') === `#/${active}`));
   if (!keepScroll) window.scrollTo(0, 0);
@@ -765,6 +776,7 @@ const importers = {
     const parsed = parseBackup(text);
     if (!confirm('Recuperar este backup substitui os dados atuais deste aparelho. Continuar?')) return;
     state = parsed;
+    loadError = false; // A pessoa escolheu substituir o que não pôde ser lido.
     save();
     toast('Backup recuperado');
   },
@@ -886,8 +898,21 @@ const actions = {
   },
   'update-apply'() {
     updateRequested = true;
-    if (swReg?.waiting) swReg.waiting.postMessage('skipWaiting');
-    else location.reload();
+    updateEl.hidden = true;
+    if (!loadError && (plan() || Object.keys(state.drafts).length)) {
+      autoBackup(); // Só dentro do toque o navegador permite o download.
+      save();
+    }
+    // O intervalo deixa o download começar antes de o app recarregar.
+    setTimeout(() => {
+      if (swReg?.waiting) swReg.waiting.postMessage('skipWaiting');
+      else location.reload();
+    }, UPDATE_BACKUP_DELAY);
+  },
+  'retry-load'() { location.reload(); },
+  'save-raw'() {
+    download(`fitmonjaro-dados-${today()}-${hhmm(new Date()).replace(':', '')}.json`, JSON.stringify(fromRecords(confirmed), null, 2));
+    toast('Cópia salva em Downloads');
   },
   async 'update-check'() {
     if (!swReg) {

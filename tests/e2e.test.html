@@ -405,6 +405,22 @@ async function flow() {
   doc = await open('#/progresso');
   ok('histórico visível depois de recuperar', text(doc).includes('Treinos cumpridos') && text(doc).includes('69,5'));
 
+  // Dados que esta versão não consegue ler nunca podem ser sobrescritos.
+  await withDb((db) => applyOps(db, [{ store: 'plans', key: 'quebrado', value: { schemaVersion: 99 } }]));
+  const unreadable = await withDb((db) => readAll(db));
+  doc = await open('#/hoje');
+  ok('dados ilegíveis não abrem a configuração', !doc.querySelector('[data-form="setup"]') && !doc.querySelector('[data-import="setup-plan"]'));
+  ok('dados ilegíveis oferecem recuperar', Boolean(doc.querySelector('[data-a="retry-load"]')) && Boolean(doc.querySelector('[data-import="backup"]')) && doc.getElementById('nav').hidden);
+  doc = await open('#/editor');
+  ok('editor bloqueado com dados ilegíveis', !doc.querySelector('[data-a="ed-new"]'));
+  const rawFile = await captureFile(doc.querySelector('[data-a="save-raw"]'));
+  ok('cópia dos dados ilegíveis', JSON.parse(rawFile).plans.quebrado.schemaVersion === 99);
+  await settle();
+  ok('banco intacto enquanto ilegível', same(await withDb((db) => readAll(db)), unreadable) && localStorage.getItem(LEGACY_KEY) === null);
+  await importFile(doc, 'backup', backup);
+  ok('backup resolve os dados ilegíveis', await until(async () => same(await data(), JSON.parse(backup))));
+  ok('app volta depois de resolver', await until(async () => !frame.contentDocument.getElementById('nav').hidden));
+
   const records = await withDb((db) => readAll(db));
   ok('banco guarda um registro por item', records.filter((r) => r.store === 'measurements').length === (await data()).measurements.length && records.some((r) => r.store === 'sessions'));
   ok('diário limpo quando tudo foi gravado', localStorage.getItem(LEGACY_KEY) === null);

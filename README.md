@@ -59,4 +59,4 @@ Links de vídeo precisam usar `https://`.
 2. No Android, abra o endereço no Chrome e escolha **Instalar app** no menu.
 3. Envie o arquivo do plano para o celular (por um canal seguro, como e-mail protegido ou cabo USB) e escolha-o no primeiro uso.
 
-A cada nova publicação, aumente `CACHE` em `web/sw.js`; sem isso, os aparelhos continuam com a versão antiga. O app procura atualizações ao abrir e ao voltar do segundo plano, e mostra o aviso **Atualizar**; também dá para verificar em **Perfil › Verificar atualização**.
+A cada nova publicação, aumente `CACHE` em `web/sw.js`; sem isso, os aparelhos continuam com a versão antiga. O app procura atualizações ao abrir e ao voltar do segundo plano, e mostra o aviso **Atualizar**; também dá para verificar em **Perfil › Verificar atualização**. Tocar em **Atualizar** salva antes uma cópia em Downloads. Se os dados do aparelho não puderem ser lidos, o app não grava nada até a pessoa escolher um backup.

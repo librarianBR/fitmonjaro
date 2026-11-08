@@ -1,5 +1,5 @@
 // Aumente a versão a cada publicação para os aparelhos receberem os arquivos novos.
-const CACHE = 'fitmonjaro-v9';
+const CACHE = 'fitmonjaro-v10';
 const ASSETS = [
   './',
   './index.html',

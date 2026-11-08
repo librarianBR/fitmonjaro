@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>Testes de logic.js</title>
+<pre id="out">rodando</pre>
+<script type="module">
+import * as L from '../web/logic.js';
+
+const results = [];
+const eq = (name, got, want) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  results.push(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : ` -> ${JSON.stringify(got)} != ${JSON.stringify(want)}`}`);
+};
+const throws = (name, fn, part = '') => {
+  let msg = null;
+  try { fn(); } catch (e) { msg = e.message; }
+  eq(name, msg !== null && msg.includes(part), true);
+};
+
+const plan = await (await fetch('./plano-exemplo.json')).json();
+const copy = () => JSON.parse(JSON.stringify(plan));
+const clean = (mutate) => { const p = copy(); mutate(p); return p; };
+
+eq('plano de exemplo válido', L.validatePlan(plan).id, 'plano-exemplo');
+eq('15 exercícios', Object.keys(plan.exercises).length, 15);
+eq('A com 9 exercícios', L.workoutItems(plan, 'A').length, 9);
+eq('B com 8 exercícios', L.workoutItems(plan, 'B').length, 8);
+
+const sch = L.buildSchedule(plan, '2026-11-11'); // quarta: deve alinhar na segunda 09/11
+eq('36 sessões', sch.length, 36);
+eq('18 A', sch.filter((s) => s.workout === 'A').length, 18);
+eq('alinha na segunda', sch[0].date, '2026-11-09');
+eq('semana 1 ABA', sch.slice(0, 3).map((s) => s.workout).join(''), 'ABA');
+eq('semana 2 BAB', sch.slice(3, 6).map((s) => s.workout).join(''), 'BAB');
+eq('semana 12 BAB', sch.slice(33).map((s) => s.workout).join(''), 'BAB');
+eq('última sexta', sch[35].date, '2027-01-29');
+eq('dias do plano', sch.slice(0, 3).map((s) => s.day), ['Seg', 'Qua', 'Sex']);
+eq('sessão por data', L.sessionOn(sch, '2026-11-11').id, 'w1-Qua');
+eq('sem sessão na terça', L.sessionOn(sch, '2026-11-10'), null);
+
+const custom = clean((p) => { p.durationWeeks = 2; p.schedule = { days: [1, 3], rotation: [['A', 'B']] }; });
+eq('plano com outros dias', L.buildSchedule(custom, '2026-11-09').map((s) => s.date), ['2026-11-10', '2026-11-12', '2026-11-17', '2026-11-19']);
+
+eq('próxima segunda a partir de sábado', L.nextMonday('2026-11-07'), '2026-11-09');
+eq('segunda continua segunda', L.nextMonday('2026-11-09'), '2026-11-09');
+
+eq('fase', [4, 5, 9].map((w) => L.phaseOf(plan, w).name), ['Adaptação', 'Construção', 'Intensificação']);
+eq('rodadas', [1, 2, 3, 12].map((w) => L.roundsFor(plan, w)), [2, 2, 3, 3]);
+eq('versão leve', L.roundsFor(plan, 10, true), 2);
+const [startBlock, mainBlock] = plan.workouts.A.blocks;
+eq('bloco fixo ignora a semana', L.blockRounds(plan, startBlock, 10, false), 2);
+eq('bloco comum segue a semana', L.blockRounds(plan, mainBlock, 10, false), 3);
+
+eq('próximo = hoje', L.nextSession(sch, {}, '2026-11-11').id, 'w1-Qua');
+eq('hoje registrado avança', L.nextSession(sch, { 'w1-Qua': { status: 'feito' } }, '2026-11-11').id, 'w1-Sex');
+eq('rascunho não conclui', L.nextSession(sch, { 'w1-Qua': { status: '' } }, '2026-11-11').id, 'w1-Qua');
+eq('atrasados', L.overdueSessions(sch, { 'w1-Seg': { status: 'pulado' } }, '2026-11-13').map((s) => s.id), ['w1-Qua']);
+eq('fim do plano', L.nextSession(sch, {}, '2027-02-01'), null);
+
+const log = { 'w1-Seg': { status: 'feito' }, 'w1-Qua': { status: 'leve' }, 'w1-Sex': { status: 'pulado' } };
+eq('adesão', L.adherence(sch, log, '2026-11-16'), { due: 4, done: 1, light: 1, skipped: 1, pct: 50 });
+eq('adesão antes do início', L.adherence(sch, {}, '2026-11-01').pct, null);
+
+const ex = { max: 12 };
+const sets = (...v) => ({ sets: v.map((value) => ({ value, done: true })) });
+eq('pronto para progredir', L.readyToProgress(ex, sets('12', '12'), 2), true);
+eq('uma série abaixo', L.readyToProgress(ex, sets('12', '11'), 2), false);
+eq('série faltando', L.readyToProgress(ex, sets('12'), 2), false);
+eq('não concluída', L.readyToProgress(ex, { sets: [{ value: '12' }] }, 1), false);
+
+const hist = { 'w1-Seg': { exercises: { A1: { band: 'Leve', sets: [{ value: '10', done: true }, { value: '11', done: true }, { value: '50' }] } } } };
+eq('melhor da semana ignora não concluída', L.bestInWeek(sch, hist, 'A1', 1), { value: 11, band: 'Leve' });
+eq('semana vazia', L.bestInWeek(sch, hist, 'A1', 4), null);
+eq('pirâmide conta como concluída', L.bestInWeek(sch, { 'w1-Qua': { exercises: { B6: { sets: [{ done: true }] } } } }, 'B6', 1), { value: 0, band: '' });
+eq('séries com extra herdada', L.setCount(plan, mainBlock, 3, false, 0), 3);
+eq('extra respeita o limite', L.setCount(plan, mainBlock, 3, false, 2), 3);
+eq('extra na adaptação', L.setCount(plan, mainBlock, 1, false, 1), 3);
+eq('bloco fixo ignora extra', L.setCount(plan, startBlock, 1, false, 1), 2);
+eq('estado novo sem cópia registrada', L.emptyState().lastBackup, null);
+
+eq('idade antes do aniversário', L.ageAt('1985-11-20', '2026-11-07'), 40);
+eq('idade no aniversário', L.ageAt('1985-11-07', '2026-11-07'), 41);
+eq('idade sem nascimento', L.ageAt('', '2026-11-07'), null);
+eq('IMC', L.bmi(80, 170).toFixed(1), '27.7');
+eq('IMC sem altura', L.bmi(80, null), null);
+eq('músculo %', L.musclePct({ weight: 80, muscle: 30 }).toFixed(1), '37.5');
+eq('músculo % sem dado', L.musclePct({ weight: 80 }), null);
+
+eq('sem ritmo com peso único', L.weightRate([{ date: '2026-11-01', weight: 80 }]), null);
+eq('sem ritmo com menos de 7 dias', L.weightRate([{ date: '2026-11-01', weight: 80 }, { date: '2026-11-05', weight: 79 }]), null);
+eq('ritmo ideal', L.weightRate([{ date: '2026-11-01', weight: 100 }, { date: '2026-11-08', weight: 99.3 }]).level, 'ideal');
+eq('ritmo rápido', L.weightRate([{ date: '2026-11-01', weight: 100 }, { date: '2026-11-08', weight: 98 }]).level, 'rapido');
+eq('ritmo lento', L.weightRate([{ date: '2026-11-01', weight: 100 }, { date: '2026-11-08', weight: 100 }]).level, 'lento');
+eq('ritmo normaliza 14 dias', L.weightRate([{ date: '2026-11-01', weight: 100 }, { date: '2026-11-15', weight: 98 }]).pct, 1);
+
+const meas = [{ date: '2026-12-01', weight: 76, muscle: 30 }, { date: '2026-11-01', weight: 80 }];
+eq('variação usa primeira e última', L.changeOf(meas, (m) => m.weight), { first: 80, last: 76, delta: -4 });
+eq('variação ignora campo vazio', L.changeOf(meas, (m) => m.muscle).delta, 0);
+eq('variação sem dado', L.changeOf([], (m) => m.weight), null);
+
+eq('proteína 60 kg', L.proteinRange(60), [72, 96]);
+eq('proteína sem alvo', L.proteinRange(null), null);
+
+const doses = [{ date: '2026-11-01', dose: 2.5 }, { date: '2026-11-29', dose: 5 }];
+eq('aumento de dose recente', L.doseRaisedRecently(doses, '2026-12-02'), true);
+eq('aumento de dose antigo', L.doseRaisedRecently(doses, '2026-12-10'), false);
+eq('dose estável', L.doseRaisedRecently([{ date: '2026-11-01', dose: 2.5 }, { date: '2026-11-08', dose: 2.5 }], '2026-11-09'), false);
+eq('aumento futuro ignorado', L.doseRaisedRecently(doses, '2026-11-02'), false);
+
+const merged = L.mergeMeasurement([{ date: '2026-11-01', weight: 80, muscle: 30 }], { date: '2026-11-01', weight: 79.5 });
+eq('pesagem mantém bioimpedância', merged, [{ date: '2026-11-01', weight: 79.5, muscle: 30 }]);
+eq('campo vazio não apaga', L.mergeMeasurement([{ date: '2026-11-01', fat: 20 }], { date: '2026-11-01', fat: null }), [{ date: '2026-11-01', fat: 20 }]);
+
+throws('plano: JSON quebrado', () => L.parsePlan('{'), 'não é um JSON');
+throws('plano: formato futuro', () => L.validatePlan(clean((p) => { p.schemaVersion = 2; })), 'versão');
+throws('plano: id perigoso', () => L.validatePlan(clean((p) => { p.id = '__proto__'; })), 'id');
+throws('plano: exercício inexistente', () => L.validatePlan(clean((p) => { p.workouts.A.blocks[0].items = ['Z9']; })), 'Z9');
+throws('plano: herança não vale como exercício', () => L.validatePlan(clean((p) => { p.workouts.A.blocks[0].items = ['constructor']; })), 'constructor');
+throws('plano: treino inexistente', () => L.validatePlan(clean((p) => { p.schedule.rotation[0][0] = 'Z'; })), 'Z');
+throws('plano: rotação curta', () => L.validatePlan(clean((p) => { p.schedule.rotation = [['A']]; })), 'rotação');
+throws('plano: vídeo javascript', () => L.validatePlan(clean((p) => { p.exercises.A1.video.url = 'javascript:alert(1)'; })), 'https');
+throws('plano: vídeo no aquecimento', () => L.validatePlan(clean((p) => { p.warmup.items[0].video = { label: 'x', url: 'http://x' }; })), 'https');
+throws('plano: faixa invertida', () => L.validatePlan(clean((p) => { p.exercises.A1.min = 20; })), 'faixa');
+
+const good = { ...L.emptyState(), plans: { [plan.id]: plan }, activePlanId: plan.id, planStarts: { [plan.id]: '2026-11-09' }, extra: 'x' };
+const parsed = L.parseBackup(JSON.stringify(good));
+eq('backup válido', parsed.planStarts[plan.id], '2026-11-09');
+eq('backup antigo sem escolhas', parsed.choices, {});
+eq('backup mantém escolhas', L.parseBackup(JSON.stringify({ ...good, choices: { [plan.id]: { A1: { band: 'Leve' } } } })).choices[plan.id].A1.band, 'Leve');
+eq('backup mantém a última cópia', L.parseBackup(JSON.stringify({ ...good, lastBackup: { file: 'f.json', at: '2026-11-07T10:00:00Z' } })).lastBackup.file, 'f.json');
+eq('backup descarta última cópia malformada', L.parseBackup(JSON.stringify({ ...good, lastBackup: { file: 1 } })).lastBackup, null);
+throws('plano: duração estimada inválida', () => L.validatePlan(clean((p) => { p.workouts.A.estimatedMinutes = -5; })), 'duração');
+eq('plano: rótulo de dor opcional', L.validatePlan(clean((p) => { p.painLabel = 'Dor no joelho'; })).painLabel, 'Dor no joelho');
+throws('plano: rótulo de dor vazio', () => L.validatePlan(clean((p) => { p.painLabel = ''; })), 'painLabel');
+throws('plano: tarefa diária sem rótulo', () => L.validatePlan(clean((p) => { p.dailyTasks[0].label = ''; })), 'dailyTasks');
+eq('backup descarta campo desconhecido', 'extra' in parsed, false);
+throws('backup: versão antiga', () => L.parseBackup(JSON.stringify({ ...good, version: 1 })), 'inválido');
+throws('backup: JSON quebrado', () => L.parseBackup('x'), 'inválido');
+throws('backup: lista com data ruim', () => L.parseBackup(JSON.stringify({ ...good, measurements: [{ date: 'x' }] })), 'inválido');
+throws('backup: plano ativo ausente', () => L.parseBackup(JSON.stringify({ ...good, activePlanId: 'nada' })), 'inválido');
+throws('backup: plano com vídeo inseguro', () => {
+  const bad = copy();
+  bad.exercises.A1.video.url = 'javascript:alert(1)';
+  L.parseBackup(JSON.stringify({ ...good, plans: { [plan.id]: bad } }));
+}, 'https');
+
+const full = { ...good, sessions: { [plan.id]: { 'w1-Seg': { status: 'feito' }, 'w1-Sáb': { status: 'leve' } } },
+  measurements: [{ date: '2026-11-08', weight: 79 }, { date: '2026-11-01', weight: 80 }], injections: [{ date: '2026-11-02', dose: 2.5 }],
+  daily: { '2026-11-01': { water: true } }, choices: { [plan.id]: { A1: { band: 'Leve' } } } };
+delete full.extra;
+const recs = L.toRecords(full);
+eq('um registro por item', recs.filter((r) => r.store === 'sessions').map((r) => r.key), [`${plan.id}/w1-Seg`, `${plan.id}/w1-Sáb`]);
+const back = L.fromRecords(recs);
+eq('registros voltam ao estado', back.sessions, full.sessions);
+eq('medições voltam ordenadas', back.measurements.map((m) => m.date), ['2026-11-01', '2026-11-08']);
+eq('escolhas preservadas', back.choices, full.choices);
+eq('estado reconstruído é um backup válido', L.parseBackup(JSON.stringify(back)).profile.name, '');
+eq('sem mudança, sem gravação', L.diffRecords(recs, L.toRecords(full)), []);
+const changed = JSON.parse(JSON.stringify(full));
+changed.daily['2026-11-01'].protein = '80';
+eq('grava só o dia alterado', L.diffRecords(recs, L.toRecords(changed)).map((o) => `${o.store}:${o.key}`), ['daily:2026-11-01']);
+const removed = { ...full, injections: [] };
+eq('apaga o que sumiu', L.diffRecords(recs, L.toRecords(removed)), [{ store: 'injections', key: '2026-11-02', delete: true }]);
+eq('banco vazio grava tudo', L.diffRecords([], recs).length, recs.length);
+
+// Editor de planos
+const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object'
+  ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+const draft = L.draftFromPlan(plan);
+eq('rascunho tem exercícios em lista', draft.exercises.map((e) => e.id).slice(0, 2), ['A1', 'A2']);
+eq('rascunho volta ao mesmo plano', canon(L.planFromDraft(draft)), canon(plan));
+eq('rascunho de plano válido não tem problema', L.draftProblem(draft), null);
+eq('plano em branco já é válido', L.draftProblem(L.blankDraft()), null);
+eq('plano em branco vira plano', L.validatePlan(L.planFromDraft(L.blankDraft())).workouts.A.blocks[0].items, ['A1']);
+const edit = (fn) => { const d = L.draftFromPlan(plan); fn(d); return d; };
+eq('id de exercício repetido', L.draftProblem(edit((d) => { d.exercises[1].id = 'A1'; })), 'exercício com id repetido: A1');
+eq('exercício sem id', L.draftProblem(edit((d) => { d.exercises[0].id = ' '; })), 'exercício sem id');
+eq('campo obrigatório vazio', L.draftProblem(edit((d) => { d.name = ''; })), 'nome ausente');
+eq('vídeo sem https', L.draftProblem(edit((d) => { d.exercises[0].video.url = 'http://x'; })), 'exercício A1: o vídeo precisa de um link https');
+eq('vídeo vazio é omitido', 'video' in L.planFromDraft(edit((d) => { d.exercises[0].video = { label: 'x', url: '' }; })).exercises.A1, false);
+eq('opcionais vazios são omitidos', Object.keys(L.planFromDraft(edit((d) => { d.workouts[0].estimatedMinutes = ''; d.painLabel = ''; d.workouts[0].blocks[0].rounds = ''; })).workouts.A).includes('estimatedMinutes'), false);
+eq('textos sem espaços nas pontas', L.planFromDraft(edit((d) => { d.name = '  Meu plano  '; })).name, 'Meu plano');
+eq('linhas vazias removidas', L.planFromDraft(edit((d) => { d.safety.stop = ['a', ' ', 'b']; })).safety.stop, ['a', 'b']);
+eq('dias em ordem', L.planFromDraft(edit((d) => { d.schedule.days = [4, 0, 2]; })).schedule.days, [0, 2, 4]);
+const renamed = L.draftFromPlan(plan);
+L.renameInDraft(renamed, 'exercise', 'A1', 'AGACH');
+eq('renomear exercício atualiza os blocos', renamed.workouts[0].blocks[1].items, ['AGACH', 'B5']);
+renamed.exercises[0].id = 'AGACH';
+L.renameInDraft(renamed, 'workout', 'A', 'PERNAS');
+renamed.workouts[0].id = 'PERNAS';
+eq('renomear treino atualiza a rotação', renamed.schedule.rotation[0], ['PERNAS', 'B', 'PERNAS']);
+eq('rascunho renomeado continua válido', L.draftProblem(renamed), null);
+const junk = L.normalizeDraft({ exercises: 'x', workouts: [{ blocks: [{ items: [1, 'B1'] }] }], schedule: { days: [9, 1] } });
+eq('rascunho estranho é normalizado', [junk.exercises, junk.workouts[0].blocks[0].items, junk.schedule.days], [[], ['1', 'B1'], [1]]);
+const withDrafts = { ...good, drafts: { d1: { updatedAt: '2026-11-08T10:00:00Z', plan: draft }, 'x y': { plan: {} }, d2: 'lixo' } };
+const restored = L.parseBackup(JSON.stringify(withDrafts));
+eq('backup guarda rascunhos válidos', Object.keys(restored.drafts), ['d1']);
+eq('rascunho do backup preservado', canon(restored.drafts.d1.plan), canon(draft));
+eq('backup sem rascunhos', L.parseBackup(JSON.stringify(good)).drafts, {});
+const draftRecs = L.toRecords(restored).filter((r) => r.store === 'drafts');
+eq('um registro por rascunho', draftRecs.map((r) => r.key), ['d1']);
+eq('rascunho volta do banco', canon(L.fromRecords(L.toRecords(restored)).drafts), canon(restored.drafts));
+
+const failed = results.filter((r) => r.startsWith('FAIL')).length;
+document.getElementById('out').textContent = `${results.join('\n')}\n\n${results.length - failed}/${results.length} passaram\n${failed ? 'FALHOU' : 'SUCESSO'}`;
+if (new URLSearchParams(location.search).has('report')) fetch('/__r', { method: 'POST', body: document.getElementById('out').textContent });
+</script>
+</html>

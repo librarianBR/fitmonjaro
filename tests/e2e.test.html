@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>Teste de ponta a ponta</title>
+<style>body{margin:0} iframe{border:0;width:412px;height:800px;display:block} pre{white-space:pre-wrap}</style>
+<pre id="out">rodando</pre>
+<iframe id="app" title="app"></iframe>
+<script type="module">
+// Usa o app real num iframe. Apaga os dados do app neste endereço.
+import { addDays, diffRecords, fromRecords, mondayOf, toISO, toRecords } from '../web/logic.js';
+import { applyOps, deleteDb, openDb, readAll } from '../web/db.js';
+
+const LEGACY_KEY = 'fitmonjaro.v2';
+const out = document.getElementById('out');
+const frame = document.getElementById('app');
+const results = [];
+window.__errors = [];
+const ok = (name, cond) => {
+  results.push(`${cond ? 'ok  ' : 'FAIL'} ${name}`);
+  out.textContent = results.join('\n');
+};
+const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+const until = async (cond) => {
+  for (let i = 0; i < 300; i++) {
+    if (await cond()) return true;
+    await tick(100);
+  }
+  return cond();
+};
+// Espera o app terminar as gravações e lê o banco diretamente.
+async function settle() {
+  for (let i = 0; i < 500; i++) {
+    const pending = frame.contentDocument?.documentElement?.dataset?.pending;
+    if (!pending || pending === '0') return;
+    await tick(20);
+  }
+}
+async function withDb(fn) {
+  const db = await openDb();
+  try {
+    return await fn(db);
+  } finally {
+    db.close();
+  }
+}
+async function data() {
+  await settle();
+  return withDb(async (db) => fromRecords(await readAll(db)));
+}
+const writeState = (s) => withDb(async (db) => applyOps(db, diffRecords(await readAll(db), toRecords(s))));
+async function resetDb() {
+  frame.src = 'about:blank';
+  await new Promise((r) => { frame.onload = r; });
+  await deleteDb();
+}
+// Compara estados sem depender da ordem das chaves.
+const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object'
+  ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+const planId = 'plano-exemplo';
+const logs = async () => (await data()).sessions[planId];
+const today = toISO(new Date());
+const monday = mondayOf(today);
+
+const open = async (hash) => {
+  frame.src = 'about:blank'; // Só mudar o # não recarregaria o app.
+  await new Promise((r) => { frame.onload = r; });
+  frame.src = `../web/index.html${hash}`;
+  await new Promise((r) => { frame.onload = r; });
+  frame.contentWindow.addEventListener('error', (e) => window.__errors.push(e.message));
+  frame.contentWindow.addEventListener('unhandledrejection', (e) => window.__errors.push(String(e.reason)));
+  frame.contentWindow.confirm = () => true;
+  await until(async () => frame.contentDocument.getElementById('view')?.childElementCount > 0); // O app carrega o banco antes de desenhar.
+  await tick(100);
+  return frame.contentDocument;
+};
+
+const fill = (doc, form, values) => {
+  const f = doc.querySelector(`[data-form="${form}"]`);
+  for (const [k, v] of Object.entries(values)) f.elements[k].value = v;
+  return f;
+};
+const check = (el, on = true) => { if (el.checked !== on) el.click(); };
+const type = (el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const text = (doc = frame.contentDocument) => doc.getElementById('view').textContent;
+
+const importFile = async (doc, kind, content) => {
+  const input = doc.querySelector(`[data-import="${kind}"]`);
+  const dt = new frame.contentWindow.DataTransfer();
+  dt.items.add(new frame.contentWindow.File([content], 'x.json', { type: 'application/json' }));
+  input.files = dt.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await tick(300);
+};
+
+// Intercepta o arquivo gerado por um toque, sem depender da pasta de downloads.
+async function captureFile(el) {
+  const win = frame.contentWindow;
+  const original = win.URL.createObjectURL;
+  let blob = null;
+  win.URL.createObjectURL = (b) => { blob = b; return original.call(win.URL, b); };
+  el.click();
+  await tick(300);
+  win.URL.createObjectURL = original;
+  return blob ? blob.text() : null;
+}
+const submitButton = (form) => form.querySelector('button:not([type=button])');
+
+async function flow() {
+  // Migração: dados do armazenamento antigo passam para o IndexedDB.
+  await resetDb();
+  const planText = await (await fetch('./plano-exemplo.json')).text();
+  const bundled = JSON.parse(planText);
+  localStorage.setItem(LEGACY_KEY, JSON.stringify({
+    version: 2, profile: { name: 'Legado Teste', sex: 'Feminino', birthDate: '1980-01-01', height: 160, targetWeight: null, conditions: '' },
+    activePlanId: bundled.id, plans: { [bundled.id]: bundled }, planStarts: { [bundled.id]: monday }, sessions: { [bundled.id]: { 'w1-Seg': { status: 'feito' } } },
+    daily: {}, measurements: [{ date: today, weight: 71 }], injections: [], choices: {}, lastBackup: null,
+  }));
+  let doc = await open('#/hoje');
+  ok('dados antigos aparecem', text(doc).includes('Olá, Legado'));
+  ok('dados antigos gravados no banco', (await data()).sessions[planId]['w1-Seg'].status === 'feito');
+  ok('armazenamento antigo removido após migrar', localStorage.getItem(LEGACY_KEY) === null);
+  // Fechamento imediato: um diário pendente é aplicado ao banco na próxima abertura.
+  const pendingState = await data();
+  pendingState.profile.name = 'Diário Pendente';
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(pendingState));
+  doc = await open('#/hoje');
+  ok('diário pendente é aplicado', text(doc).includes('Olá, Diário') && (await data()).profile.name === 'Diário Pendente');
+  ok('diário removido depois de aplicado', localStorage.getItem(LEGACY_KEY) === null);
+  await resetDb();
+  doc = await open('#/hoje');
+
+  // 1. Identificar a pessoa
+  ok('primeiro uso pede o arquivo do plano', Boolean(doc.querySelector('[data-import="setup-plan"]')) && !doc.querySelector('[data-form="setup"]'));
+  ok('menu oculto na configuração', doc.getElementById('nav').hidden);
+  ok('configuração leva ao editor de planos', Boolean(doc.querySelector('a[href="#/editor"]')));
+  await importFile(doc, 'setup-plan', '{"schemaVersion":1}');
+  ok('arquivo de plano inválido é recusado', !frame.contentDocument.getElementById('toast').hidden && !frame.contentDocument.querySelector('[data-form="setup"]'));
+  // No Android o seletor de arquivos é outra tela: o app fica oculto e volta antes de receber o arquivo.
+  const picker = frame.contentDocument.querySelector('[data-import="setup-plan"]');
+  picker.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  Object.defineProperty(frame.contentDocument, 'visibilityState', { configurable: true, get: () => 'visible' });
+  frame.contentDocument.dispatchEvent(new Event('visibilitychange'));
+  ok('voltar do seletor de arquivos não troca a tela', picker.isConnected);
+  const dt = new frame.contentWindow.DataTransfer();
+  dt.items.add(new frame.contentWindow.File([planText], 'plano.json', { type: '' })); // Anexos no Android podem vir sem tipo.
+  picker.files = dt.files;
+  picker.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(async () => Boolean(frame.contentDocument.querySelector('[data-form="setup"]')));
+  doc = frame.contentDocument;
+  ok('plano escolhido libera o perfil', Boolean(doc.querySelector('[data-form="setup"]')) && text(doc).includes('Plano de exemplo'));
+  const setup = fill(doc, 'setup', { name: 'Maria Teste', sex: 'Feminino', birthDate: '1990-03-15', height: '165', weight: '70', targetWeight: '60', conditions: '', startDate: monday });
+  const firstBackup = await captureFile(submitButton(setup));
+  ok('perfil salvo', (await data()).profile.name === 'Maria Teste' && (await data()).profile.height === 165);
+  ok('primeira cópia sai sozinha', JSON.parse(firstBackup).profile.name === 'Maria Teste');
+  ok('peso inicial entra no histórico', (await data()).measurements.length === 1 && (await data()).measurements[0].weight === 70);
+  ok('plano escolhido ativo', (await data()).activePlanId === planId);
+  ok('saudação usa o nome', text().includes('Olá, Maria'));
+  ok('menu com ícones', frame.contentDocument.querySelectorAll('#nav a svg').length === 5);
+
+  // 3. Saber o que fazer
+  doc = await open('#/sessao/w1-Seg');
+  ok('Treino A com 9 exercícios', doc.querySelectorAll('[data-card]').length === 9);
+  ok('selo do treino', doc.querySelector('.badge')?.textContent === 'A');
+  ok('mostra séries e alvo juntos', doc.querySelector('[data-card="A1"] .target').textContent === '2 × 10–12');
+  ok('mostra a carga', doc.querySelector('[data-card="A1"] .load').textContent.includes('Carga do exercício A1'));
+  ok('instrução recolhida', !doc.querySelector('[data-card="A1"] details.how').open && text(doc).includes('Como fazer o exercício A1'));
+  ok('mostra o vídeo', Boolean(doc.querySelector('a[href="https://example.com/video-a1"]')));
+  ok('mostra quando parar', text(doc).includes('Sinal de alerta de exemplo'));
+  ok('bloco fixo com 2 séries', doc.querySelector('[data-card="A5"]').querySelectorAll('.set').length === 2);
+
+  // 4. Registro rápido
+  const rows = doc.querySelector('[data-card="A1"]').querySelectorAll('.set');
+  check(rows[0].querySelector('input[type=checkbox]'));
+  await tick();
+  ok('marcar aceita a sugestão', (await logs())['w1-Seg'].exercises.A1.sets[0].value === '10');
+  ok('série marcada muda de cor', rows[0].classList.contains('done'));
+  ok('aviso de salvamento automático', doc.getElementById('saved').textContent.includes('Salvo às'));
+  ok('primeiro do bloco não inicia descanso', doc.getElementById('rest').hidden);
+  rows[1].querySelector('[data-delta="1"]').click();
+  rows[1].querySelector('[data-delta="1"]').click();
+  ok('botão + soma à sugestão', rows[1].querySelector('input[type=number]').value === '12');
+  check(rows[1].querySelector('input[type=checkbox]'));
+  type(rows[0].querySelector('input[type=number]'), '12');
+  ok('sugestão de progressão no máximo', !doc.querySelector('[data-ready="A1"]').hidden);
+
+  const b5 = doc.querySelector('[data-card="B5"]').querySelectorAll('.set');
+  check(b5[0].querySelector('input[type=checkbox]'));
+  ok('último do bloco inicia descanso', !doc.getElementById('rest').hidden);
+  doc.querySelector('[data-a="rest-stop"]').click();
+
+  doc.querySelector('[data-card="A1"] [data-a="add-set"]').click();
+  await tick();
+  ok('+ série adiciona linha', doc.querySelector('[data-card="A1"]').querySelectorAll('.set').length === 3);
+  ok('limite de 3 séries', !doc.querySelector('[data-card="A1"] [data-a="add-set"]'));
+  ok('valores continuam após redesenhar', doc.querySelector('[data-card="A1"] input[type=number]').value === '12');
+
+  const band = doc.querySelector('[data-card="A1"] select');
+  type(band, 'Leve');
+  type(doc.querySelector('[data-card="B5"] select'), 'Médio');
+
+  doc.querySelector('[data-a="note-chip"][data-text="Cansaço"]').click();
+  doc.querySelector('[data-a="note-chip"][data-text="Náusea"]').click();
+  ok('etiquetas viram observação', doc.getElementById('notes').value === 'Cansaço; Náusea');
+  const xss = '<img src=x onerror="window.top.pwned=1">';
+  type(doc.getElementById('notes'), xss);
+  type(doc.querySelector('[data-f="pain"]'), '3');
+
+  doc = await open('#/sessao/w1-Seg');
+  ok('rascunho sobrevive ao fechar o app', doc.getElementById('notes').value === xss);
+  ok('observação não vira HTML', !window.pwned && !doc.querySelector('#view img'));
+  const autoFile = await captureFile(doc.querySelector('[data-a="finish"][data-status="feito"]'));
+  await tick(200);
+  ok('treino concluído', (await logs())['w1-Seg'].status === 'feito');
+  ok('cópia salva sozinha ao concluir', JSON.parse(autoFile).sessions[planId]['w1-Seg'].status === 'feito');
+  const fileName = (await data()).lastBackup.file;
+  ok('nome da cópia com data e hora', new RegExp(`^fitmonjaro-${today}-\\d{4}\\.json$`).test(fileName));
+  ok('abre a tela de conclusão', frame.contentWindow.location.hash === '#/concluido/w1-Seg');
+  const done = text();
+  ok('conclusão resume o treino', done.includes('Treino concluído') && done.includes('3 série(s)') && done.includes('dor 3/10'));
+  ok('conclusão diz onde está o arquivo', done.includes(fileName) && done.includes('Downloads') && done.includes('Arquivos'));
+  ok('conclusão explica como consultar e recuperar', done.includes('Progresso') && done.includes('Recuperar backup'));
+
+  doc = await open('#/concluido/w1-Seg');
+  ok('conclusão reaberta mostra a última cópia', text(doc).includes(fileName));
+
+  doc = await open('#/treinos');
+  ok('lista marca Feito', doc.querySelector('.chip .mark.feito')?.textContent.includes('Feito'));
+  ok('evolução usa a melhor série', doc.querySelector('tbody tr').cells[1].textContent.startsWith('12'));
+
+  doc = await open('#/sessao/w1-Sex');
+  ok('repetições replicadas', doc.querySelector('[data-card="A1"] input[type=number]').placeholder === '12');
+  ok('elástico replicado', doc.querySelector('[data-card="A1"] select').value === 'Leve');
+  ok('série extra replicada', doc.querySelector('[data-card="A1"]').querySelectorAll('.set').length === 3);
+  ok('elástico escolhido sem concluir também é replicado', doc.querySelector('[data-card="B5"] select').value === 'Médio');
+  check(doc.querySelector('[data-card="A1"] input[type=checkbox]'));
+  await tick();
+  ok('elástico herdado entra no registro', (await logs())['w1-Sex'].exercises.A1.band === 'Leve');
+
+  doc = await open('#/sessao/w1-Qua');
+  ok('Treino B com pirâmide', text(doc).includes('Pirâmide') && text(doc).includes('5‑3‑1'));
+  check(doc.querySelector('[data-f="pyramid"]'));
+  await tick();
+  ok('pirâmide registrada', (await logs())['w1-Qua'].exercises.B6.sets[0].done === true);
+  check(doc.querySelector('[data-f="light"]'));
+  await tick();
+  ok('versão leve grava status leve', frame.contentDocument.querySelector('[data-a="finish"]').dataset.status === 'leve');
+  ok('versão leve não herda série extra', frame.contentDocument.querySelector('[data-card="B5"]').querySelectorAll('.set').length === 2);
+
+  // Registro em um toque, com um plano que treina todo dia, para o teste valer em qualquer data
+  const s = (await data());
+  s.plans[planId].schedule = { days: [0, 1, 2, 3, 4, 5, 6], rotation: [['A', 'B', 'A', 'B', 'A', 'B', 'A']] };
+  s.sessions[planId] = {};
+  await writeState(s);
+  doc = await open('#/hoje');
+  ok('Hoje mostra o treino do dia', text(doc).includes('Treino de hoje') && text(doc).includes('≈ 45 min'));
+  ok('lista de exercícios recolhida', Boolean(doc.querySelector('.outline li')) && !doc.querySelector('.outline').closest('details').open);
+  const quickFile = await captureFile(doc.querySelector('[data-a="quick"][data-status="leve"]'));
+  ok('um toque registra o treino', Object.values((await logs()))[0].status === 'leve' && Object.values((await logs()))[0].quick === true);
+  ok('um toque também salva a cópia', Boolean(quickFile));
+  ok('um toque também mostra a conclusão', await until(async () => text().includes('registro rápido') && text().includes('Downloads')));
+  doc = await open(`#/sessao/${encodeURIComponent('w1-Sáb')}`);
+  ok('treino de sábado abre pelo endereço', text(doc).includes('Sáb'));
+  doc = await open('#/hoje');
+  ok('Hoje confirma o registro', text(doc).includes('Treino de hoje registrado'));
+
+  const before = (await data()).lastBackup.at;
+  await tick(50);
+  const weightFile = await captureFile(submitButton(fill(doc, 'quick-weight', { weight: '69.5' })));
+  ok('peso rápido sem sair de Hoje', (await data()).measurements.at(-1).weight === 69.5 && frame.contentWindow.location.hash === '#/hoje');
+  ok('peso também gera cópia', JSON.parse(weightFile).measurements.at(-1).weight === 69.5 && (await data()).lastBackup.at !== before);
+  frame.contentDocument.querySelector('[data-a="toggle-daily"][data-field="water"]').click();
+  await tick();
+  ok('hidratação com um toque', (await data()).daily[today].water === true);
+  ok('bloco marcado aparece ativo', frame.contentDocument.querySelector('[data-field="water"]').classList.contains('on'));
+  type(frame.contentDocument.querySelector('[data-field="protein"]'), '80');
+  ok('proteína registrada', (await data()).daily[today].protein === '80');
+
+  // 1. Evolução no tempo
+  doc = await open('#/progresso');
+  await captureFile(submitButton(fill(doc, 'measurement', { date: addDays(today, -7), weight: '70.2', visceral: '9', fat: '30.8', muscle: '25' })));
+  await captureFile(submitButton(fill(frame.contentDocument, 'measurement', { date: today, weight: '69.5', visceral: '8', fat: '30', muscle: '24.9' })));
+  const stats = text();
+  ok('medição mantém data única', (await data()).measurements.filter((m) => m.date === today).length === 1);
+  ok('mostra variação de gordura', stats.includes('-0,8 kg desde o início'));
+  ok('mostra músculo % do peso', stats.includes('Músculo % do peso') && stats.includes('35,8%'));
+  ok('mostra IMC e idade', stats.includes('IMC 25,5') && /\d{2} anos/.test(stats));
+  ok('mostra quanto falta', stats.includes('faltam 9,5 kg'));
+  ok('mostra ritmo', stats.includes('% por semana'));
+  ok('mostra treinos cumpridos', stats.includes('Treinos cumpridos'));
+  await captureFile(submitButton(fill(frame.contentDocument, 'injection', { date: addDays(today, -21), dose: '2.5' })));
+  await captureFile(submitButton(fill(frame.contentDocument, 'injection', { date: addDays(today, -1), dose: '5' })));
+  doc = await open('#/hoje');
+  ok('aviso de aumento de dose', text(doc).includes('aumento de dose'));
+
+  // 2. Escolher e alterar o plano
+  doc = await open('#/plano');
+  const planJson = await captureFile(doc.querySelector('[data-a="export-plan"]'));
+  ok('plano exportado', JSON.parse(planJson).id === planId);
+  const edited = JSON.parse(planJson);
+  edited.id = 'plano-editado';
+  edited.name = 'Plano Editado';
+  edited.exercises.A1.target = '99 repetições';
+  edited.painLabel = 'Dor no joelho';
+  await importFile(doc, 'plan', JSON.stringify(edited));
+  ok('plano importado fica ativo', await until(async () => (await data()).activePlanId === 'plano-editado'));
+  doc = await open('#/sessao/w1-Seg');
+  ok('alteração aparece no treino', text(doc).includes('99 repetições'));
+  ok('rótulo de dor vem do plano', text(doc).includes('Dor no joelho:') && Boolean(doc.querySelector('[data-text="Dor no joelho"]')));
+  doc = await open('#/plano');
+  await importFile(doc, 'plan', '{"schemaVersion":1}');
+  ok('plano inválido é recusado', await until(async () => !frame.contentDocument.getElementById('toast').hidden) && (await data()).activePlanId === 'plano-editado');
+  doc = frame.contentDocument;
+  doc.querySelector(`[data-a="del-plan"][data-plan="${planId}"]`).click();
+  await tick();
+  ok('plano com histórico não é apagado', Boolean((await data()).plans[planId]));
+  doc.querySelector(`[data-a="use-plan"][data-plan="${planId}"]`).click();
+  await tick(200);
+  ok('volta ao plano anterior', (await data()).activePlanId === planId);
+  ok('histórico do plano preservado', Object.keys((await logs())).length > 0);
+  doc = await open('#/plano');
+  doc.querySelector('[data-a="del-plan"][data-plan="plano-editado"]').click();
+  await tick();
+  ok('plano sem histórico é apagado', !(await data()).plans['plano-editado']);
+
+  // 6. Editor de planos
+  doc = await open('#/editor');
+  ok('editor abre pela tela Plano', text(doc).includes('Editor de planos') && text(doc).includes('Nenhum plano em elaboração'));
+  doc.querySelector('[data-a="ed-new"]').click();
+  await until(async () => Boolean(frame.contentDocument.getElementById('ed-status')));
+  doc = frame.contentDocument;
+  const draftId = frame.contentWindow.location.hash.split('/')[2];
+  ok('plano em branco já é válido', doc.getElementById('ed-status').classList.contains('ok'));
+  type(doc.querySelector('[data-ed="name"]'), 'Plano do Editor');
+  type(doc.querySelector('[data-ed="id"]'), 'plano-editor');
+  ok('título acompanha o nome', doc.getElementById('ed-title').textContent === 'Plano do Editor');
+  ok('alteração salva sozinha', await until(async () => (await data()).drafts[draftId]?.plan.name === 'Plano do Editor'));
+  doc = await open(`#/editor/${draftId}`);
+  ok('rascunho reaberto mantém alterações', doc.querySelector('[data-ed="name"]').value === 'Plano do Editor' && doc.querySelector('[data-ed="id"]').value === 'plano-editor');
+
+  doc.querySelector('[data-a="ed-add"][data-tpl="exercise"]').click();
+  await tick();
+  doc = frame.contentDocument;
+  ok('exercício novo aparece aberto', doc.querySelector('[data-sec="exercises.1"]')?.open === true);
+  type(doc.querySelector('[data-ed="exercises.1.name"]'), 'Ponte');
+  type(doc.querySelector('[data-ed="exercises.1.video.url"]'), 'https://example.com/ponte');
+  ok('resumo do exercício acompanha o nome', doc.querySelector('[data-sum="exercises.1"]').textContent === 'E1 · Ponte');
+  type(doc.querySelector('[data-ed="workouts.0.blocks.0.items"]'), 'A1 ZZ');
+  ok('problema aparece na hora', doc.getElementById('ed-status').classList.contains('warn') && doc.getElementById('ed-status').textContent.includes('ZZ'));
+  const blocked = await captureFile(doc.querySelector('[data-a="ed-export"]'));
+  ok('plano incompleto não é exportado', blocked === null && !doc.getElementById('toast').hidden);
+  type(doc.querySelector('[data-ed="workouts.0.blocks.0.items"]'), 'A1 E1');
+  ok('problema some ao corrigir', doc.getElementById('ed-status').classList.contains('ok'));
+  const idField = doc.querySelector('[data-ed="exercises.0.id"]');
+  type(idField, 'AGACH');
+  idField.dispatchEvent(new Event('change', { bubbles: true }));
+  await tick();
+  doc = frame.contentDocument;
+  ok('renomear exercício atualiza o treino', doc.querySelector('[data-ed="workouts.0.blocks.0.items"]').value === 'AGACH E1' && doc.getElementById('ed-status').classList.contains('ok'));
+  check(doc.querySelector('[data-ed="schedule.days"][data-day="1"]'));
+  ok('dia a mais pede ajuste na rotação', doc.getElementById('ed-status').textContent.includes('um treino por dia'));
+  type(doc.querySelector('[data-ed="schedule.rotation.0"]'), 'A A A A');
+  ok('rotação ajustada', doc.getElementById('ed-status').classList.contains('ok'));
+  type(doc.querySelector('[data-ed="safety.stop"]'), 'Parar se doer\n\nAvisar o profissional');
+  const exported = JSON.parse(await captureFile(doc.querySelector('[data-a="ed-export"]')));
+  ok('exporta o plano completo', exported.id === 'plano-editor' && exported.exercises.E1.name === 'Ponte' && exported.exercises.E1.video.url === 'https://example.com/ponte');
+  ok('exportado com dias, rotação e listas', exported.schedule.days.join() === '0,1,2,4' && exported.workouts.A.blocks[0].items.join() === 'AGACH,E1' && exported.safety.stop.length === 2);
+
+  frame.contentDocument.querySelector('[data-a="ed-use"]').click();
+  ok('usar aqui ativa o plano', await until(async () => (await data()).activePlanId === 'plano-editor'));
+  doc = await open('#/sessao/w1-Ter');
+  ok('treino do plano criado aparece', text(doc).includes('Ponte') && text(doc).includes('Treino A'));
+  doc = await open('#/plano');
+  doc.querySelector(`[data-a="use-plan"][data-plan="${planId}"]`).click();
+  await until(async () => (await data()).activePlanId === planId);
+
+  doc = await open('#/editor');
+  ok('lista mostra o plano pronto', text(doc).includes('Plano do Editor') && text(doc).includes('Pronto'));
+  doc.querySelector('[data-a="ed-copy"]').click();
+  await until(async () => Boolean(frame.contentDocument.getElementById('ed-status')));
+  ok('alterar o plano em uso copia o plano', frame.contentDocument.querySelector('[data-ed="id"]').value === planId && frame.contentDocument.getElementById('ed-status').classList.contains('ok'));
+  doc = await open('#/editor');
+  await importFile(doc, 'draft', planText);
+  ok('importa plano para o editor', await until(async () => Object.keys((await data()).drafts).length === 3));
+  doc = await open('#/editor');
+  doc.querySelector(`[data-a="ed-delete"][data-d="${draftId}"]`).click();
+  ok('exclui plano do editor', await until(async () => !(await data()).drafts[draftId]) && !text().includes('Plano do Editor'));
+
+  // 5. Cópia automática e recuperação
+  doc = await open('#/ajustes');
+  ok('sem botão de exportar manual', !doc.querySelector('[data-a="export-backup"]'));
+  ok('Perfil explica onde estão os dados', text(doc).includes('Downloads') && text(doc).includes((await data()).lastBackup.file));
+  const backup = await captureFile(submitButton(doc.querySelector('[data-form="profile"]')));
+  ok('salvar o perfil gera cópia', Boolean(backup));
+  frame.contentDocument.querySelector('[data-a="wipe"]').click();
+  await tick(200);
+  ok('dados apagados', (await data()).profile.name === '');
+  doc = await open('#/hoje');
+  ok('sem dados volta à configuração', Boolean(doc.querySelector('[data-import="setup-plan"]')));
+  await importFile(doc, 'backup', 'não é json');
+  ok('backup inválido é recusado', (await data()).profile.name === '');
+  await importFile(doc, 'backup', backup);
+  ok('backup recupera tudo', await until(async () => same(await data(), JSON.parse(backup))));
+  ok('app volta ao normal', await until(async () => !frame.contentDocument.getElementById('nav').hidden));
+  doc = await open('#/progresso');
+  ok('histórico visível depois de recuperar', text(doc).includes('Treinos cumpridos') && text(doc).includes('69,5'));
+
+  const records = await withDb((db) => readAll(db));
+  ok('banco guarda um registro por item', records.filter((r) => r.store === 'measurements').length === (await data()).measurements.length && records.some((r) => r.store === 'sessions'));
+  ok('diário limpo quando tudo foi gravado', localStorage.getItem(LEGACY_KEY) === null);
+  ok('sem erros de JavaScript', window.__errors.length === 0);
+  results.push(...window.__errors);
+}
+
+const failed = () => results.filter((r) => r.startsWith('FAIL')).length;
+
+try {
+  await flow();
+} catch (e) {
+  results.push(`FAIL exceção: ${e.stack}`);
+}
+out.textContent = `${results.join('\n')}\n\n${results.length - failed()}/${results.length} passaram\n${failed() ? 'FALHOU' : 'SUCESSO'}`;
+frame.remove();
+// Execução automatizada: envia o resultado ao servidor local de testes.
+if (new URLSearchParams(location.search).has('report')) fetch('/__r', { method: 'POST', body: out.textContent });
+</script>
+</html>

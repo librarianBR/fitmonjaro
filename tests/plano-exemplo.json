@@ -1,0 +1,416 @@
+{
+  "schemaVersion": 1,
+  "id": "plano-exemplo",
+  "name": "Plano de exemplo",
+  "version": "1",
+  "description": "Modelo de plano com dois treinos alternados. Os exercícios são fictícios: substitua pelos do seu plano.",
+  "durationWeeks": 12,
+  "maxRounds": 3,
+  "lightRounds": 2,
+  "reviewWeeks": [
+    1,
+    4,
+    8,
+    12
+  ],
+  "schedule": {
+    "days": [
+      0,
+      2,
+      4
+    ],
+    "rotation": [
+      [
+        "A",
+        "B",
+        "A"
+      ],
+      [
+        "B",
+        "A",
+        "B"
+      ]
+    ]
+  },
+  "roundsByWeek": [
+    {
+      "fromWeek": 1,
+      "toWeek": 2,
+      "rounds": 2
+    },
+    {
+      "fromWeek": 3,
+      "toWeek": 12,
+      "rounds": 3
+    }
+  ],
+  "phases": [
+    {
+      "name": "Adaptação",
+      "fromWeek": 1,
+      "toWeek": 4,
+      "focus": "Técnica e postura."
+    },
+    {
+      "name": "Construção",
+      "fromWeek": 5,
+      "toWeek": 8,
+      "focus": "Mais controle nos movimentos."
+    },
+    {
+      "name": "Intensificação",
+      "fromWeek": 9,
+      "toWeek": 12,
+      "focus": "Versões mais difíceis dos exercícios."
+    }
+  ],
+  "guidance": {
+    "effort": "Termine cada série sentindo que conseguiria fazer só mais 2 ou 3 repetições.",
+    "progression": "Ao atingir o topo da faixa em todas as séries, com boa técnica, aumente a dificuldade em um só exercício: encurte o elástico, passe ao próximo nível ou use a versão mais difícil.",
+    "videos": "Os números do plano prevalecem sobre os dos vídeos, que servem apenas para mostrar a técnica."
+  },
+  "dailyTasks": [
+    {
+      "id": "walk",
+      "label": "Atividade aeróbica",
+      "days": [
+        0,
+        2,
+        4
+      ],
+      "icon": "walk"
+    },
+    {
+      "id": "mobility",
+      "label": "Mobilidade",
+      "days": [
+        1,
+        3
+      ],
+      "list": "mobility",
+      "icon": "mobility"
+    }
+  ],
+  "warmup": {
+    "title": "Aquecimento",
+    "items": [
+      {
+        "name": "Aquecimento 1",
+        "dose": "1 min"
+      },
+      {
+        "name": "Aquecimento 2",
+        "dose": "1 min"
+      },
+      {
+        "name": "Aquecimento 3",
+        "dose": "1 min"
+      },
+      {
+        "name": "Aquecimento 4",
+        "dose": "1 min"
+      },
+      {
+        "name": "Aquecimento 5",
+        "dose": "1 min"
+      }
+    ]
+  },
+  "mobility": {
+    "title": "Mobilidade",
+    "items": [
+      {
+        "name": "Mobilidade 1",
+        "dose": "1 min"
+      },
+      {
+        "name": "Mobilidade 2",
+        "dose": "1 min"
+      },
+      {
+        "name": "Mobilidade 3",
+        "dose": "1 min"
+      },
+      {
+        "name": "Mobilidade 4",
+        "dose": "1 min"
+      },
+      {
+        "name": "Mobilidade 5",
+        "dose": "1 min"
+      }
+    ]
+  },
+  "bandLevels": [
+    "Sem elástico",
+    "Leve",
+    "Médio",
+    "Forte"
+  ],
+  "exercises": {
+    "A1": {
+      "name": "Exercício A1",
+      "target": "10–12",
+      "min": 10,
+      "max": 12,
+      "unit": "reps",
+      "load": "Carga do exercício A1",
+      "band": true,
+      "how": "Como fazer o exercício A1.",
+      "video": {
+        "label": "Vídeo de exemplo",
+        "url": "https://example.com/video-a1"
+      }
+    },
+    "A2": {
+      "name": "Exercício A2",
+      "target": "10–15",
+      "min": 12,
+      "max": 15,
+      "unit": "reps",
+      "load": "Carga do exercício A2",
+      "band": true,
+      "how": "Como fazer o exercício A2."
+    },
+    "A3": {
+      "name": "Exercício A3",
+      "target": "8–12",
+      "min": 8,
+      "max": 10,
+      "unit": "reps",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício A3."
+    },
+    "A4": {
+      "name": "Exercício A4",
+      "target": "10–15",
+      "min": 12,
+      "max": 15,
+      "unit": "reps",
+      "load": "Carga do exercício A4",
+      "band": true,
+      "how": "Como fazer o exercício A4."
+    },
+    "A5": {
+      "name": "Exercício A5",
+      "target": "10 passos",
+      "min": 10,
+      "max": 10,
+      "unit": "passos",
+      "load": "Carga do exercício A5",
+      "band": true,
+      "how": "Como fazer o exercício A5."
+    },
+    "A6": {
+      "name": "Exercício A6",
+      "target": "10–12",
+      "min": 12,
+      "max": 12,
+      "unit": "reps",
+      "load": "Carga do exercício A6",
+      "band": true,
+      "how": "Como fazer o exercício A6."
+    },
+    "A7": {
+      "name": "Exercício A7",
+      "target": "12–15",
+      "min": 15,
+      "max": 20,
+      "unit": "reps",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício A7."
+    },
+    "B1": {
+      "name": "Exercício B1",
+      "target": "8–12",
+      "min": 8,
+      "max": 10,
+      "unit": "reps",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício B1."
+    },
+    "B2": {
+      "name": "Exercício B2",
+      "target": "10–12",
+      "min": 12,
+      "max": 15,
+      "unit": "reps",
+      "load": "Carga do exercício B2",
+      "band": true,
+      "how": "Como fazer o exercício B2."
+    },
+    "B3": {
+      "name": "Exercício B3",
+      "target": "20–40 s",
+      "min": 20,
+      "max": 40,
+      "unit": "s",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício B3."
+    },
+    "B4": {
+      "name": "Exercício B4",
+      "target": "8–12",
+      "min": 8,
+      "max": 12,
+      "unit": "reps",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício B4."
+    },
+    "B5": {
+      "name": "Exercício B5",
+      "target": "10–15",
+      "min": 12,
+      "max": 15,
+      "unit": "reps",
+      "load": "Carga do exercício B5",
+      "band": true,
+      "how": "Como fazer o exercício B5."
+    },
+    "B6": {
+      "name": "Exercício B6",
+      "target": "Pirâmide",
+      "min": 5,
+      "max": 5,
+      "unit": "reps",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício B6."
+    },
+    "B7": {
+      "name": "Exercício B7",
+      "target": "Pirâmide",
+      "min": 5,
+      "max": 5,
+      "unit": "reps",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício B7."
+    },
+    "B8": {
+      "name": "Exercício B8",
+      "target": "Pirâmide",
+      "min": 5,
+      "max": 5,
+      "unit": "reps",
+      "load": "Peso do corpo",
+      "band": false,
+      "how": "Como fazer o exercício B8."
+    }
+  },
+  "workouts": {
+    "A": {
+      "title": "Treino A",
+      "blocks": [
+        {
+          "type": "sets",
+          "label": "Início",
+          "rounds": 2,
+          "restSeconds": 0,
+          "items": [
+            "A5"
+          ]
+        },
+        {
+          "type": "sets",
+          "label": "Bloco 1",
+          "restSeconds": 60,
+          "items": [
+            "A1",
+            "B5"
+          ]
+        },
+        {
+          "type": "sets",
+          "label": "Bloco 2",
+          "restSeconds": 60,
+          "items": [
+            "A2",
+            "B4"
+          ]
+        },
+        {
+          "type": "sets",
+          "label": "Bloco 3",
+          "restSeconds": 60,
+          "items": [
+            "A3",
+            "A7"
+          ]
+        },
+        {
+          "type": "sets",
+          "label": "Bloco 4",
+          "restSeconds": 60,
+          "items": [
+            "A4",
+            "A6"
+          ]
+        }
+      ],
+      "estimatedMinutes": 45
+    },
+    "B": {
+      "title": "Treino B",
+      "blocks": [
+        {
+          "type": "sets",
+          "label": "Bloco 1",
+          "restSeconds": 60,
+          "items": [
+            "B1",
+            "B5"
+          ]
+        },
+        {
+          "type": "sets",
+          "label": "Bloco 2",
+          "restSeconds": 60,
+          "items": [
+            "B2",
+            "B4"
+          ]
+        },
+        {
+          "type": "sets",
+          "label": "Bloco 3",
+          "restSeconds": 60,
+          "items": [
+            "B3"
+          ]
+        },
+        {
+          "type": "pyramid",
+          "label": "Pirâmide",
+          "instructions": "Pirâmide 5‑3‑1: 5 repetições, depois 3, depois 1.",
+          "items": [
+            "B6",
+            "B7",
+            "B8"
+          ]
+        }
+      ],
+      "estimatedMinutes": 45
+    }
+  },
+  "safety": {
+    "emergencyTitle": "Emergência: procure atendimento na hora",
+    "emergency": [
+      "Sinal de alerta de exemplo"
+    ],
+    "stop": [
+      "Pare se sentir dor forte e avise o profissional que acompanha você."
+    ],
+    "avoid": [
+      "Movimento a evitar de exemplo"
+    ],
+    "always": [
+      "Cuidado de exemplo"
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 // Aumente a versão a cada publicação para os aparelhos receberem os arquivos novos.
-const CACHE = 'fitmonjaro-v8';
+const CACHE = 'fitmonjaro-v9';
 const ASSETS = [
   './',
   './index.html',
@@ -15,7 +15,17 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // "reload" evita guardar arquivos antigos que ainda estejam no cache HTTP do navegador.
+  event.waitUntil(caches.open(CACHE)
+    .then((cache) => cache.addAll(ASSETS.map((url) => new Request(url, { cache: 'reload' }))))
+    .then(() => caches.keys())
+    // As versões até a 8 não têm o aviso de atualização: quem vem delas entra direto, uma única vez.
+    .then((keys) => (keys.some((k) => /^fitmonjaro-v[1-8]$/.test(k)) ? self.skipWaiting() : undefined)));
+});
+
+// A versão nova espera aqui até a pessoa tocar em Atualizar.
+self.addEventListener('message', (event) => {
+  if (event.data === 'skipWaiting') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {

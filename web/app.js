@@ -23,6 +23,8 @@ const view = document.getElementById('view');
 const nav = document.getElementById('nav');
 const toastEl = document.getElementById('toast');
 const restEl = document.getElementById('rest');
+const updateEl = document.getElementById('update');
+const UPDATE_INTERVAL = 15 * 60 * 1000;
 
 let state = emptyState();
 let setupPlan = null; // Plano escolhido na configuração inicial, antes de salvar o perfil.
@@ -34,6 +36,10 @@ let pending = 0;
 let restEnd = 0;
 let restTimer = null;
 let wakeLock = null;
+let swReg = null;
+let lastUpdateCheck = 0;
+let updateRequested = false;
+let appVersion = '';
 
 const snapshot = (records) => JSON.parse(JSON.stringify(records));
 
@@ -586,6 +592,10 @@ function settingsView() {
       <form data-form="profile" class="stack">${profileFields(p)}<button class="primary">${icon('save')} Salvar perfil</button></form>
     </details>
     <section class="card"><h2>Seus dados</h2>${dataInfo()}${importButton('backup', 'Recuperar backup', 'primary')}</section>
+    <section class="card stack"><h2>Aplicativo</h2>
+      ${appVersion ? `<p class="muted">Versão ${esc(appVersion)}</p>` : ''}
+      <button type="button" class="ghost" data-a="update-check">${icon('restore')} Verificar atualização</button>
+    </section>
     <details class="card"><summary>${icon('trash')} Apagar dados</summary>
       <p class="muted">Remove tudo deste aparelho, inclusive os planos em elaboração. As cópias em Downloads continuam lá.</p>
       <button class="danger" data-a="wipe">Apagar todos os dados</button>
@@ -874,6 +884,27 @@ const actions = {
     location.hash = '#/hoje';
     render();
   },
+  'update-apply'() {
+    updateRequested = true;
+    if (swReg?.waiting) swReg.waiting.postMessage('skipWaiting');
+    else location.reload();
+  },
+  async 'update-check'() {
+    if (!swReg) {
+      toast('Atualização indisponível neste navegador.');
+      return;
+    }
+    toast('Verificando…');
+    try {
+      await checkForUpdate();
+    } catch {
+      toast('Sem conexão: tente de novo quando estiver on-line.');
+      return;
+    }
+    const found = await settledUpdate();
+    if (!found) toast('Você já está com a versão mais recente.');
+    else toast('Nova versão pronta: toque em Atualizar.');
+  },
   'rest-add'() { restEnd += 30000; tickRest(); },
   'rest-stop': stopRest,
   ...editorActions,
@@ -953,6 +984,59 @@ document.addEventListener('visibilitychange', () => {
 
 Object.assign(importers, editorImporters);
 
+/* ---------- Atualização do app ---------- */
+
+// O aviso só aparece quando já há uma versão em uso: a primeira instalação não é atualização.
+function showUpdate() {
+  updateEl.hidden = !(swReg?.waiting && navigator.serviceWorker.controller);
+}
+
+function checkForUpdate() {
+  lastUpdateCheck = Date.now();
+  return swReg.update();
+}
+
+// Espera o download terminar. Devolve true se houver uma versão nova em espera.
+function settledUpdate() {
+  const worker = swReg.installing;
+  if (!worker) return Promise.resolve(Boolean(swReg.waiting));
+  return new Promise((resolve) => {
+    const done = () => {
+      if (worker.state === 'installing') return;
+      worker.removeEventListener('statechange', done);
+      resolve(Boolean(swReg.waiting));
+    };
+    worker.addEventListener('statechange', done);
+    done();
+  });
+}
+
+async function setupUpdates() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    // Com outra versão baixada, a mais antiga é a que está em uso.
+    const versions = (await caches.keys()).map((k) => Number(k.match(/^fitmonjaro-v(\d+)$/)?.[1])).filter(Boolean);
+    if (versions.length) appVersion = String(Math.min(...versions));
+    swReg = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' });
+  } catch {
+    return;
+  }
+  swReg.addEventListener('updatefound', () => {
+    const worker = swReg.installing;
+    worker?.addEventListener('statechange', showUpdate);
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (updateRequested) location.reload(); // Só recarrega a pedido: nunca no meio de um treino.
+  });
+  showUpdate();
+  checkForUpdate().catch(() => {}); // Sem conexão: tenta de novo na próxima abertura.
+}
+
+// No Android o app costuma voltar do fundo sem recarregar, então a abertura não basta.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && swReg && Date.now() - lastUpdateCheck > UPDATE_INTERVAL) checkForUpdate().catch(() => {});
+});
+
 // Plano vindo do editor: substitui ou ativa neste aparelho; sem perfil, segue para a configuração.
 function usePlan(p) {
   if (!plan()) {
@@ -979,7 +1063,7 @@ async function boot() {
   }
   if (plan()) navigator.storage?.persist?.().catch(() => {});
   render();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  setupUpdates();
 }
 
 boot();

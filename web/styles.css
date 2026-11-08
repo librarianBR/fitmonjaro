@@ -405,3 +405,8 @@ nav a[aria-current] { color: var(--accent); }
 .ed-days label { align-items: center; display: flex; font-weight: 500; gap: 4px; min-height: 40px; }
 label small { display: block; font-weight: 400; margin-top: 4px; }
 .grow { color: var(--text); flex: 1; min-width: 0; text-decoration: none; }
+
+/* ---------- Aviso de atualização ---------- */
+#update:not([hidden]) { align-items: center; background: var(--accent); color: var(--on-accent); display: flex; font-weight: 600; gap: 12px; padding: 8px 16px; position: sticky; top: 0; z-index: 20; }
+#update span { flex: 1; }
+#update button { background: var(--on-accent); color: var(--accent); flex: none; min-height: 44px; width: auto; }
